@@ -30,15 +30,14 @@ using namespace llvm;
 
 STATISTIC(HelloCounter, "Counts number of functions greeted");
 
-int get_type_str(Type *type, char *buf) {
+int get_type_str(Type *type, char *buf, int max_len) {
+  if (!type) return -1;
+  
   std::string str;
   raw_string_ostream os(str);
-  if (type)
-    type->print(os);
-  else
-    return -1;
-
-  strncpy(buf, str.c_str(), 100); // limit to 100 characters
+  type->print(os);
+  
+  strncpy(buf, str.c_str(), max_len); // limit to 100 characters
   return strlen(buf);
 }
 
@@ -58,41 +57,41 @@ namespace {
       std::stringstream ss;
       ss << "\t" << "Arg num: " << i << ", " << "Arg name: " << argName << "Type: " << type << '\n';
       if (type) {
-        outs() << "\t" << argName << ": ";
-        char buf[100];
-        int n = get_type_str(type, buf);
-        if (n > 0) outs() << "\tType is " << n << " chars long: " << buf << "\n";
-        PointerType *pointerTypeCast = dyn_cast<PointerType>(type);
+        // outs() << "\t" << argName << ": ";
+        char buf[100] = {0};
+        get_type_str(type, buf, sizeof(buf));
+        // if (n > 0) outs() << "\tType is " << n << " chars long: " << buf << "\n";
+        // PointerType *pointerTypeCast = dyn_cast<PointerType>(type);
         ArrayType *arrayTypeCast = dyn_cast<ArrayType>(type);
         VectorType *vectorTypeCast = dyn_cast<VectorType>(type);
         StructType *structTypeCast = dyn_cast<StructType>(type);
-        outs() << ((pointerTypeCast) ? "\tpointerTypeCast is valid!\n" : "\tpointerTypeCast is not valid\n");
-        outs() << ((arrayTypeCast) ? "\tarrayTypeCast is valid!\n" : "\tarrayTypeCast is not valid\n");
-        outs() << ((vectorTypeCast) ? "\tvectorTypeCast is valid!\n" : "\tvectorTypeCast is not valid\n");
-        outs() << ((structTypeCast) ? "\tstructTypeCast is valid!\n" : "\tstructTypeCast is not valid\n");
+        // outs() << ((pointerTypeCast) ? "\tpointerTypeCast is valid!\n" : "\tpointerTypeCast is not valid\n");
+        // outs() << ((arrayTypeCast) ? "\tarrayTypeCast is valid!\n" : "\tarrayTypeCast is not valid\n");
+        // outs() << ((vectorTypeCast) ? "\tvectorTypeCast is valid!\n" : "\tvectorTypeCast is not valid\n");
+        // outs() << ((structTypeCast) ? "\tstructTypeCast is valid!\n" : "\tstructTypeCast is not valid\n");
         
         Type *elType;
         int numElementsInStruct;
         if (arrayTypeCast) elType = arrayTypeCast->getElementType();
         else if (vectorTypeCast) elType = vectorTypeCast->getElementType();
         else if (structTypeCast && (numElementsInStruct = structTypeCast->getNumElements())) {
-          outs() << "Num elements in struct: " << numElementsInStruct << "\n";
+          // outs() << "Num elements in struct: " << numElementsInStruct << "\n";
           elType = structTypeCast->getElementType(0);
         }
-        else outs() << "\tCould not cast type using getElementType!!\n";
+        // else outs() << "\tCould not cast type using getElementType!!\n";
        
-        outs() << "\tThe type is " << type << ", " << type->getTypeID();
+        // outs() << "\tThe type is " << type << ", " << type->getTypeID();
         // outs() << elType->getTypeID() << "\n";
         if (elType) {
-          outs() << "\tElement type: " << elType;
-          if (elType->getTypeID() != NULL) outs() << "elementType is " << elType->getTypeID() << '\n';
+          // outs() << "\tElement type: " << elType;
+          // if (elType->getTypeID() != NULL) outs() << "elementType is " << elType->getTypeID() << '\n';
         }
        
       }
       else {
-        outs() << "\t" << (!argName.empty() ? argName : "Type") << " is not available\n";
+        // outs() << "\t" << (!argName.empty() ? argName : "Type") << " is not available\n";
       }
-      outs() << ss.str();
+      // outs() << ss.str();
     }
 
     static char ID; // Pass identification, replacement for typeid
@@ -100,35 +99,65 @@ namespace {
 
     bool runOnFunction(Function &F) override {
       ++HelloCounter;
-      outs() << "Hello: ";
-      outs().write_escaped(F.getName()) << '\n';
+      // outs() << "Hello: ";
+      // outs().write_escaped(F.getName()) << '\n';
+      char funcName[70];
+      strcpy(funcName, F.getName().str().c_str());
+      // char *funcName = const_cast<char*>(F.getName().str().c_str());
+      // const char *funcName = F.getName().str().c_str();
+      // printf("%s\n", F.getName().str());
 
-      pr(-1, "_", "Instruction count", F.getInstructionCount());
-      pr_type(-1, "Return Type", F.getReturnType());
-      pr(-1, "_", "Num Params", F.getFunctionType()->getNumParams());
+      // pr(-1, "_", "Instruction count", F.getInstructionCount());
+      // pr_type(-1, "Return Type", F.getReturnType());
+      // pr(-1, "_", "Num Params", F.getFunctionType()->getNumParams());
 
       for (const Argument &arg : F.args()) {
+        // outs() << "Test top\n";
         int argNo = arg.getArgNo();
-        std::string argName = arg.getName().str();
-        pr(argNo, argName, "Has nonNullAttr", arg.hasNonNullAttr());
-        pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
-        pr(argNo, argName, "Has by ref attr", arg.hasByRefAttr());
-        pr(argNo, argName, "hasPassPointeeByValueCopyAttr", arg.hasPassPointeeByValueCopyAttr());
+        char type[80] = {0};
+
+        // outs() << "arg.getType: " << arg.getType() << "\n";
+        get_type_str(arg.getType(), type, sizeof(type));
+        
+        // char buf[80] = {0};
+        // if (funcName) {
+        //   sprintf(buf, "funcName: %s\n", funcName);
+        //   outs() << buf;
+        // }
+        // else outs() << "funcName is null\n";
+        
+        // sprintf(buf, "argNo: %02d\n", argNo);
+        // outs() << buf;
+        
+        // if (type) {
+        //   sprintf(buf, "type: %s\n", type);
+        //   outs() << buf;
+        // }
+        // else outs() << "type is null\n";
+
+        char finalBuf[200] = {0};
+        sprintf(finalBuf, "%s$%02d:%s\n", funcName, argNo, type);
+        outs() << finalBuf;
+        // std::string argName = arg.getName().str();
+        // pr(argNo, argName, "Has nonNullAttr", arg.hasNonNullAttr());
+        // pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
+        // pr(argNo, argName, "Has by ref attr", arg.hasByRefAttr());
+        // pr(argNo, argName, "hasPassPointeeByValueCopyAttr", arg.hasPassPointeeByValueCopyAttr());
         // pr(argNo, argName, "getPassPointeeByValueCopySize", arg.getPassPointeeByValueCopySize());
-        pr(argNo, argName, "hasPointeeInMemoryValueAttr", arg.hasPointeeInMemoryValueAttr());
-        pr(argNo, argName, "getDereferenceableBytes", arg.getDereferenceableBytes());
+        // pr(argNo, argName, "hasPointeeInMemoryValueAttr", arg.hasPointeeInMemoryValueAttr());
+        // pr(argNo, argName, "getDereferenceableBytes", arg.getDereferenceableBytes());
         // pr(argNo, argName, "hasPointeeInMemoryValueAttr", arg.hasPointeeInMemoryValueAttr());
         // pr(argNo, argName, "hasPointeeInMemoryValueAttr", arg.hasPointeeInMemoryValueAttr());
 
         // pr(argNo, argName, "getParamAlignment", arg.getParamAlignment());
-        pr_type(argNo, argName, arg.getType());
-        pr_type(argNo,  argName, arg.getParamByValType());
-        pr_type(argNo, argName, arg.getParamStructRetType());
-        pr_type(argNo, argName, arg.getParamByRefType());
+        // pr_type(argNo, argName, arg.getType());
+        // pr_type(argNo,  argName, arg.getParamByValType());
+        // pr_type(argNo, argName, arg.getParamStructRetType());
+        // pr_type(argNo, argName, arg.getParamByRefType());
         // pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
         // pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
 
-        // outs().write_escaped("Test") << '\n';
+        // outs().write_escaped("Test bottom") << '\n';
       }
 
       return false;
@@ -137,8 +166,8 @@ namespace {
     // We don't modify the program, so we preserve all analyses.
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
-      // AU.addRequired<DominatorTreeWrapperPass>();
-      // AU.addRequired<LoopInfoWrapperPass>();
+      AU.addRequired<DominatorTreeWrapperPass>();
+      AU.addRequired<LoopInfoWrapperPass>();
       // AU.addRequired<VerifyPass>();
     }
   };
