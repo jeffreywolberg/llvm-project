@@ -22,7 +22,7 @@ double func(int a, double b) {
 	return a + b * a;
 }
 
-static inline double foo(int a, double b, student *s, union Data *data) {
+double foo(int a, long double b, student *s, union Data *data) {
 	return a + b * a;
 }
 

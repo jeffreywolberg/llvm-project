@@ -17,7 +17,9 @@ union Data {
    char str[20];
 };
 
-double foo(int a, double b, student *s, union Data* data);
+double func(int a, double b);
+
+double foo(int a, long double b, student *s, union Data* data);
 
 int bar(int c);
 
