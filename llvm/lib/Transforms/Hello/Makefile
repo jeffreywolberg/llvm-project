@@ -34,8 +34,8 @@ $(PLUGIN).o: $(PLUGIN).cpp
 
 hello: hello.o hello.ll hello.bc
 	$(CC) $< -o $@
-hello.o: hello.c
-	$(CC) -c $^ -o $@
+hello.o: hello.c hello.h
+	$(CC) -c $< -o $@
 
 .PHONY: hello.ll
 hello.ll: hello.c

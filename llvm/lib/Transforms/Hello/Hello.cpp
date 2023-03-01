@@ -11,76 +11,36 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/IR/Dominators.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Support/Casting.h"
+#include "llvm-c/Core.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Type.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
 #include <string>
 #include <sstream>
 using namespace llvm;
 
-#define DEBUG_TYPE "hello"
+#define DEBUG_TYPE "hello2"
 
 STATISTIC(HelloCounter, "Counts number of functions greeted");
 
-namespace {
-  // Hello - The first implementation, without getAnalysisUsage.
-  struct Hello : public FunctionPass {
-    static char ID; // Pass identification, replacement for typeid
-    Hello() : FunctionPass(ID) {}
+int get_type_str(Type *type, char *buf) {
+  std::string str;
+  raw_string_ostream os(str);
+  if (type)
+    type->print(os);
+  else
+    return -1;
 
-    void pr(int i, std::string argName, const char *title, long content) {
-      std::stringstream ss;
-      ss << "\t" << "Arg num: " << i << ", " << "Arg name: " << argName << ", " << title << ": " << content << "\n";
-      errs() << ss.str();
-      // errs().write();
-    }
-
-    void pr_type(int i, std::string argName, llvm::Type *type) {
-      std::stringstream ss;
-      ss << "\t" << "Arg num: " << i << ", " << "Arg name: " << argName << "Type: " << type << '\n';
-      errs() << ss.str();
-    }
-
-    bool runOnFunction(Function &F) override {
-      ++HelloCounter;
-      errs() << "Hello: ";
-      errs().write_escaped(F.getName()) << '\n';
-
-      // std::cout << "Test" << '\n';
-      for (const Argument &arg : F.args()) {
-        // arg.dump();
-        int argNo = arg.getArgNo();
-        std::string argName = arg.getName().str();
-        pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
-        pr(argNo, argName, "Has by ref attr", arg.hasByRefAttr());
-        pr(argNo, argName, "hasPassPointeeByValueCopyAttr", arg.hasPassPointeeByValueCopyAttr());
-        // pr(argNo, argName, "getPassPointeeByValueCopySize", arg.getPassPointeeByValueCopySize());
-        pr(argNo, argName, "hasPointeeInMemoryValueAttr", arg.hasPointeeInMemoryValueAttr());
-        pr(argNo, argName, "getDereferenceableBytes", arg.getDereferenceableBytes());
-        // pr(argNo, argName, "hasPointeeInMemoryValueAttr", arg.hasPointeeInMemoryValueAttr());
-        // pr(argNo, argName, "hasPointeeInMemoryValueAttr", arg.hasPointeeInMemoryValueAttr());
-
-        // pr(argNo, argName, "getParamAlignment", arg.getParamAlignment());
-        pr_type(argNo,  argName, arg.getParamByValType());
-        pr_type(argNo, argName, arg.getParamStructRetType());
-        pr_type(argNo, argName, arg.getParamByRefType());
-        // pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
-        // pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
-
-        // errs().write_escaped("Test") << '\n';
-      }
-      return false;
-    }
-  };
+  strncpy(buf, str.c_str(), 100); // limit to 100 characters
+  return strlen(buf);
 }
-
-char Hello::ID = 0;
-static RegisterPass<Hello> X("hello", "Hello World Pass");
-
-
 
 namespace {
 
@@ -90,23 +50,49 @@ namespace {
     void pr(int i, std::string argName, const char *title, long content) {
       std::stringstream ss;
       ss << "\t" << "Arg num: " << i << ", " << "Arg name: " << argName << ", " << title << ": " << content << "\n";
-      errs() << ss.str();
-      // errs().write();
+      outs() << ss.str();
+      // outs().write();
     }
 
     void pr_type(int i, std::string argName, llvm::Type *type) {
       std::stringstream ss;
       ss << "\t" << "Arg num: " << i << ", " << "Arg name: " << argName << "Type: " << type << '\n';
-      errs() << ss.str();
-      // type->dump();
-      // type->print(outs());
-
-      // std::string type_str;
-      // llvm::raw_string_ostream rso(type_str);
-      // type->print(rso);
-      // errs() << rso.str();
-
-      // errs() << "\n";
+      if (type) {
+        outs() << "\t" << argName << ": ";
+        char buf[100];
+        int n = get_type_str(type, buf);
+        if (n > 0) outs() << "\tType is " << n << " chars long: " << buf << "\n";
+        PointerType *pointerTypeCast = dyn_cast<PointerType>(type);
+        ArrayType *arrayTypeCast = dyn_cast<ArrayType>(type);
+        VectorType *vectorTypeCast = dyn_cast<VectorType>(type);
+        StructType *structTypeCast = dyn_cast<StructType>(type);
+        outs() << ((pointerTypeCast) ? "\tpointerTypeCast is valid!\n" : "\tpointerTypeCast is not valid\n");
+        outs() << ((arrayTypeCast) ? "\tarrayTypeCast is valid!\n" : "\tarrayTypeCast is not valid\n");
+        outs() << ((vectorTypeCast) ? "\tvectorTypeCast is valid!\n" : "\tvectorTypeCast is not valid\n");
+        outs() << ((structTypeCast) ? "\tstructTypeCast is valid!\n" : "\tstructTypeCast is not valid\n");
+        
+        Type *elType;
+        int numElementsInStruct;
+        if (arrayTypeCast) elType = arrayTypeCast->getElementType();
+        else if (vectorTypeCast) elType = vectorTypeCast->getElementType();
+        else if (structTypeCast && (numElementsInStruct = structTypeCast->getNumElements())) {
+          outs() << "Num elements in struct: " << numElementsInStruct << "\n";
+          elType = structTypeCast->getElementType(0);
+        }
+        else outs() << "\tCould not cast type using getElementType!!\n";
+       
+        outs() << "\tThe type is " << type << ", " << type->getTypeID();
+        // outs() << elType->getTypeID() << "\n";
+        if (elType) {
+          outs() << "\tElement type: " << elType;
+          if (elType->getTypeID() != NULL) outs() << "elementType is " << elType->getTypeID() << '\n';
+        }
+       
+      }
+      else {
+        outs() << "\t" << (!argName.empty() ? argName : "Type") << " is not available\n";
+      }
+      outs() << ss.str();
     }
 
     static char ID; // Pass identification, replacement for typeid
@@ -114,14 +100,17 @@ namespace {
 
     bool runOnFunction(Function &F) override {
       ++HelloCounter;
-      errs() << "Hello: ";
-      errs().write_escaped(F.getName()) << '\n';
+      outs() << "Hello: ";
+      outs().write_escaped(F.getName()) << '\n';
 
-      // std::cout << "Test" << '\n';
+      pr(-1, "_", "Instruction count", F.getInstructionCount());
+      pr_type(-1, "Return Type", F.getReturnType());
+      pr(-1, "_", "Num Params", F.getFunctionType()->getNumParams());
+
       for (const Argument &arg : F.args()) {
-        // arg.dump();
         int argNo = arg.getArgNo();
         std::string argName = arg.getName().str();
+        pr(argNo, argName, "Has nonNullAttr", arg.hasNonNullAttr());
         pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
         pr(argNo, argName, "Has by ref attr", arg.hasByRefAttr());
         pr(argNo, argName, "hasPassPointeeByValueCopyAttr", arg.hasPassPointeeByValueCopyAttr());
@@ -132,13 +121,14 @@ namespace {
         // pr(argNo, argName, "hasPointeeInMemoryValueAttr", arg.hasPointeeInMemoryValueAttr());
 
         // pr(argNo, argName, "getParamAlignment", arg.getParamAlignment());
+        pr_type(argNo, argName, arg.getType());
         pr_type(argNo,  argName, arg.getParamByValType());
         pr_type(argNo, argName, arg.getParamStructRetType());
         pr_type(argNo, argName, arg.getParamByRefType());
         // pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
         // pr(argNo, argName, "Has by val attr", arg.hasByValAttr());
 
-        // errs().write_escaped("Test") << '\n';
+        // outs().write_escaped("Test") << '\n';
       }
 
       return false;
@@ -147,6 +137,9 @@ namespace {
     // We don't modify the program, so we preserve all analyses.
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
+      // AU.addRequired<DominatorTreeWrapperPass>();
+      // AU.addRequired<LoopInfoWrapperPass>();
+      // AU.addRequired<VerifyPass>();
     }
   };
 }
