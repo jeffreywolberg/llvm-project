@@ -117,7 +117,10 @@ static const RISCVSupportedExtension SupportedExtensions[] = {
     {"xtheadbb", RISCVExtensionVersion{1, 0}},
     {"xtheadbs", RISCVExtensionVersion{1, 0}},
     {"xtheadcmo", RISCVExtensionVersion{1, 0}},
+    {"xtheadcondmov", RISCVExtensionVersion{1, 0}},
+    {"xtheadfmemidx", RISCVExtensionVersion{1, 0}},
     {"xtheadmac", RISCVExtensionVersion{1, 0}},
+    {"xtheadmemidx", RISCVExtensionVersion{1, 0}},
     {"xtheadmempair", RISCVExtensionVersion{1, 0}},
     {"xtheadsync", RISCVExtensionVersion{1, 0}},
     {"xtheadvdot", RISCVExtensionVersion{1, 0}},
@@ -517,6 +520,67 @@ RISCVISAInfo::parseFeatures(unsigned XLen,
 }
 
 llvm::Expected<std::unique_ptr<RISCVISAInfo>>
+RISCVISAInfo::parseNormalizedArchString(StringRef Arch) {
+  if (llvm::any_of(Arch, isupper)) {
+    return createStringError(errc::invalid_argument,
+                             "string must be lowercase");
+  }
+  // Must start with a valid base ISA name.
+  unsigned XLen;
+  if (Arch.startswith("rv32i") || Arch.startswith("rv32e"))
+    XLen = 32;
+  else if (Arch.startswith("rv64i") || Arch.startswith("rv64e"))
+    XLen = 64;
+  else
+    return createStringError(errc::invalid_argument,
+                             "arch string must begin with valid base ISA");
+  std::unique_ptr<RISCVISAInfo> ISAInfo(new RISCVISAInfo(XLen));
+  // Discard rv32/rv64 prefix.
+  Arch = Arch.substr(4);
+
+  // Each extension is of the form ${name}${major_version}p${minor_version}
+  // and separated by _. Split by _ and then extract the name and version
+  // information for each extension.
+  SmallVector<StringRef, 8> Split;
+  Arch.split(Split, '_');
+  for (StringRef Ext : Split) {
+    StringRef Prefix, MinorVersionStr;
+    std::tie(Prefix, MinorVersionStr) = Ext.rsplit('p');
+    if (MinorVersionStr.empty())
+      return createStringError(errc::invalid_argument,
+                               "extension lacks version in expected format");
+    unsigned MajorVersion, MinorVersion;
+    if (MinorVersionStr.getAsInteger(10, MinorVersion))
+      return createStringError(errc::invalid_argument,
+                               "failed to parse minor version number");
+
+    // Split Prefix into the extension name and the major version number
+    // (the trailing digits of Prefix).
+    int TrailingDigits = 0;
+    StringRef ExtName = Prefix;
+    while (!ExtName.empty()) {
+      if (!isDigit(ExtName.back()))
+        break;
+      ExtName = ExtName.drop_back(1);
+      TrailingDigits++;
+    }
+    if (!TrailingDigits)
+      return createStringError(errc::invalid_argument,
+                               "extension lacks version in expected format");
+
+    StringRef MajorVersionStr = Prefix.take_back(TrailingDigits);
+    if (MajorVersionStr.getAsInteger(10, MajorVersion))
+      return createStringError(errc::invalid_argument,
+                               "failed to parse major version number");
+    ISAInfo->addExtension(ExtName, MajorVersion, MinorVersion);
+  }
+  ISAInfo->updateFLen();
+  ISAInfo->updateMinVLen();
+  ISAInfo->updateMaxELen();
+  return std::move(ISAInfo);
+}
+
+llvm::Expected<std::unique_ptr<RISCVISAInfo>>
 RISCVISAInfo::parseArchString(StringRef Arch, bool EnableExperimentalExtension,
                               bool ExperimentalExtensionVersionCheck,
                               bool IgnoreUnknown) {
@@ -775,35 +839,31 @@ Error RISCVISAInfo::checkDependency() {
         errc::invalid_argument,
         "standard user-level extension 'e' requires 'rv32'");
 
-  // It's illegal to specify the 'd' (double-precision floating point)
-  // extension without also specifying the 'f' (single precision
-  // floating-point) extension.
-  // TODO: This has been removed in later specs, which specify that D implies F
-  if (HasD && !HasF)
+  if (HasF && HasZfinx)
     return createStringError(errc::invalid_argument,
-                             "d requires f extension to also be specified");
+                             "'f' and 'zfinx' extensions are incompatible");
 
   if (HasZve32f && !HasF && !HasZfinx)
     return createStringError(
         errc::invalid_argument,
-        "zve32f requires f or zfinx extension to also be specified");
+        "'zve32f' requires 'f' or 'zfinx' extension to also be specified");
 
   if (HasZve64d && !HasD && !HasZdinx)
     return createStringError(
         errc::invalid_argument,
-        "zve64d requires d or zdinx extension to also be specified");
+        "'zve64d' requires 'd' or 'zdinx' extension to also be specified");
 
   if (Exts.count("zvfh") && !Exts.count("zfh") && !Exts.count("zfhmin") &&
       !Exts.count("zhinx") && !Exts.count("zhinxmin"))
     return createStringError(
         errc::invalid_argument,
-        "zvfh requires zfh, zfhmin, zhinx or zhinxmin extension to also be "
-        "specified");
+        "'zvfh' requires 'zfh', 'zfhmin', 'zhinx' or 'zhinxmin' extension to "
+        "also be specified");
 
   if (HasZvl && !HasVector)
     return createStringError(
         errc::invalid_argument,
-        "zvl*b requires v or zve* extension to also be specified");
+        "'zvl*b' requires 'v' or 'zve*' extension to also be specified");
 
   // Additional dependency checks.
   // TODO: The 'q' extension requires rv64.
@@ -812,6 +872,7 @@ Error RISCVISAInfo::checkDependency() {
   return Error::success();
 }
 
+static const char *ImpliedExtsD[] = {"f"};
 static const char *ImpliedExtsV[] = {"zvl128b", "zve64d", "f", "d"};
 static const char *ImpliedExtsZfhmin[] = {"f"};
 static const char *ImpliedExtsZfh[] = {"f"};
@@ -856,6 +917,7 @@ struct ImpliedExtsEntry {
 
 // Note: The table needs to be sorted by name.
 static constexpr ImpliedExtsEntry ImpliedExts[] = {
+    {{"d"}, {ImpliedExtsD}},
     {{"v"}, {ImpliedExtsV}},
     {{"xtheadvdot"}, {ImpliedExtsXTHeadVdot}},
     {{"zcb"}, {ImpliedExtsZcb}},

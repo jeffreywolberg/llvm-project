@@ -1992,17 +1992,15 @@ void Clang::AddMIPSTargetArgs(const ArgList &Args,
 
 void Clang::AddPPCTargetArgs(const ArgList &Args,
                              ArgStringList &CmdArgs) const {
+  const llvm::Triple &T = getToolChain().getTriple();
   if (const Arg *A = Args.getLastArg(options::OPT_mtune_EQ)) {
     CmdArgs.push_back("-tune-cpu");
-    if (strcmp(A->getValue(), "native") == 0)
-      CmdArgs.push_back(Args.MakeArgString(llvm::sys::getHostCPUName()));
-    else
-      CmdArgs.push_back(A->getValue());
+    std::string CPU = ppc::getPPCTuneCPU(Args, T);
+    CmdArgs.push_back(Args.MakeArgString(CPU));
   }
 
   // Select the ABI to use.
   const char *ABIName = nullptr;
-  const llvm::Triple &T = getToolChain().getTriple();
   if (T.isOSBinFormatELF()) {
     switch (getToolChain().getArch()) {
     case llvm::Triple::ppc64: {
@@ -6529,13 +6527,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // -fencode-extended-block-signature=1 is default.
   if (TC.IsEncodeExtendedBlockSignatureDefault())
     CmdArgs.push_back("-fencode-extended-block-signature");
-
-  if (Args.hasFlag(options::OPT_fcoroutines_ts, options::OPT_fno_coroutines_ts,
-                   false) &&
-      types::isCXX(InputType)) {
-    D.Diag(diag::warn_deperecated_fcoroutines_ts_flag);
-    CmdArgs.push_back("-fcoroutines-ts");
-  }
 
   if (Args.hasFlag(options::OPT_fcoro_aligned_allocation,
                    options::OPT_fno_coro_aligned_allocation, false) &&

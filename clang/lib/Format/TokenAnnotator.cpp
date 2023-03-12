@@ -591,10 +591,6 @@ private:
     return false;
   }
 
-  bool isCpp11AttributeSpecifier(const FormatToken &Tok) {
-    return isCppAttribute(Style.isCpp(), Tok);
-  }
-
   bool parseSquare() {
     if (!CurrentToken)
       return false;
@@ -617,7 +613,7 @@ private:
 
     const bool IsInnerSquare = Contexts.back().InCpp11AttributeSpecifier;
     const bool IsCpp11AttributeSpecifier =
-        isCpp11AttributeSpecifier(*Left) || IsInnerSquare;
+        isCppAttribute(Style.isCpp(), *Left) || IsInnerSquare;
 
     // Treat C# Attributes [STAThread] much like C++ attributes [[...]].
     bool IsCSharpAttributeSpecifier =
@@ -2244,7 +2240,7 @@ private:
     if (Tok.Next->isOneOf(tok::kw_noexcept, tok::kw_volatile, tok::kw_const,
                           tok::kw_requires, tok::kw_throw, tok::arrow,
                           Keywords.kw_override, Keywords.kw_final) ||
-        isCpp11AttributeSpecifier(*Tok.Next)) {
+        isCppAttribute(Style.isCpp(), *Tok.Next)) {
       return false;
     }
 
@@ -2613,6 +2609,13 @@ public:
 
       // Consume operators with higher precedence.
       parse(Precedence + 1);
+
+      // Do not assign fake parenthesis to tokens that are part of an
+      // unexpanded macro call. The line within the macro call contains
+      // the parenthesis and commas, and we will not find operators within
+      // that structure.
+      if (Current && Current->MacroParent)
+        break;
 
       int CurrentPrecedence = getCurrentPrecedence();
 
@@ -4389,8 +4392,12 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
       Left.isOneOf(TT_TrailingReturnArrow, TT_LambdaArrow)) {
     return true;
   }
-  if (Left.is(tok::comma) && !Right.is(TT_OverloadedOperatorLParen))
+  if (Left.is(tok::comma) && !Right.is(TT_OverloadedOperatorLParen) &&
+      // In an unexpanded macro call we only find the parentheses and commas
+      // in a line; the commas and closing parenthesis do not require a space.
+      (Left.Children.empty() || !Left.MacroParent)) {
     return true;
+  }
   if (Right.is(tok::comma))
     return false;
   if (Right.is(TT_ObjCBlockLParen))

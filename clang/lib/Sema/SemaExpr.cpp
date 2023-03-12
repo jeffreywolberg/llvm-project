@@ -19,7 +19,6 @@
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
-#include "clang/AST/Designator.h"
 #include "clang/AST/EvaluatedExprVisitor.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
@@ -41,6 +40,7 @@
 #include "clang/Sema/AnalysisBasedWarnings.h"
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/DelayedDiagnostic.h"
+#include "clang/Sema/Designator.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Overload.h"
@@ -2698,36 +2698,20 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
   // to get this right here so that we don't end up making a
   // spuriously dependent expression if we're inside a dependent
   // instance method.
-  //
-  // We also don't need to do this if R resolved to a member in another
-  // class, which can happen in an unevaluated operand:
-  //
-  // C++ [expr.prim.id]p3.3:
-  //   If that id-expression denotes a non-static data member and it
-  //   appears in an unevaluated operand.
   if (!R.empty() && (*R.begin())->isCXXClassMember()) {
-    bool MightBeImplicitMember = true, CheckField = true;
-    if (IsAddressOfOperand) {
-      MightBeImplicitMember = SS.isEmpty() && !R.isOverloadedResult();
-      CheckField = !R.isUnresolvableResult();
-    }
-    if (MightBeImplicitMember && CheckField) {
-      if (R.isSingleResult() &&
-          isa<FieldDecl, IndirectFieldDecl, MSPropertyDecl>(R.getFoundDecl())) {
-        auto Class = cast<CXXRecordDecl>((*R.begin())->getDeclContext());
-        for (auto Curr = S->getLookupEntity(); Curr && !Curr->isFileContext();
-             Curr = Curr->getParent()) {
-          if (auto ThisClass = dyn_cast_if_present<CXXRecordDecl>(Curr)) {
-            if ((MightBeImplicitMember =
-                     ThisClass->Equals(Class) ||
-                     ThisClass->isDerivedFrom(Class,
-                                              /*LookupIndependent=*/true)))
-              break;
-          }
-        }
-      } else if (IsAddressOfOperand)
-        MightBeImplicitMember = false;
-    }
+    bool MightBeImplicitMember;
+    if (!IsAddressOfOperand)
+      MightBeImplicitMember = true;
+    else if (!SS.isEmpty())
+      MightBeImplicitMember = false;
+    else if (R.isOverloadedResult())
+      MightBeImplicitMember = false;
+    else if (R.isUnresolvableResult())
+      MightBeImplicitMember = true;
+    else
+      MightBeImplicitMember = isa<FieldDecl>(R.getFoundDecl()) ||
+                              isa<IndirectFieldDecl>(R.getFoundDecl()) ||
+                              isa<MSPropertyDecl>(R.getFoundDecl());
 
     if (MightBeImplicitMember)
       return BuildPossibleImplicitMemberExpr(SS, TemplateKWLoc,
@@ -5933,8 +5917,15 @@ bool Sema::CheckCXXDefaultArgExpr(SourceLocation CallLoc, FunctionDecl *FD,
     assert(!InitWithCleanup->getNumObjects() &&
            "default argument expression has capturing blocks?");
   }
+  // C++ [expr.const]p15.1:
+  //   An expression or conversion is in an immediate function context if it is
+  //   potentially evaluated and [...] its innermost enclosing non-block scope
+  //   is a function parameter scope of an immediate function.
   EnterExpressionEvaluationContext EvalContext(
-      *this, ExpressionEvaluationContext::PotentiallyEvaluated, Param);
+      *this,
+      FD->isConsteval() ? ExpressionEvaluationContext::ImmediateFunctionContext
+                        : ExpressionEvaluationContext::PotentiallyEvaluated,
+      Param);
   ExprEvalContexts.back().IsCurrentlyCheckingDefaultArgumentOrInitializer =
       SkipImmediateInvocations;
   MarkDeclarationsReferencedInExpr(Init, /*SkipLocalVariables*/ true);
@@ -6021,8 +6012,16 @@ ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
     // Mark that we are replacing a default argument first.
     // If we are instantiating a template we won't have to
     // retransform immediate calls.
+    // C++ [expr.const]p15.1:
+    //   An expression or conversion is in an immediate function context if it
+    //   is potentially evaluated and [...] its innermost enclosing non-block
+    //   scope is a function parameter scope of an immediate function.
     EnterExpressionEvaluationContext EvalContext(
-        *this, ExpressionEvaluationContext::PotentiallyEvaluated, Param);
+        *this,
+        FD->isConsteval()
+            ? ExpressionEvaluationContext::ImmediateFunctionContext
+            : ExpressionEvaluationContext::PotentiallyEvaluated,
+        Param);
 
     if (Param->hasUninstantiatedDefaultArg()) {
       if (InstantiateDefaultArgument(CallLoc, FD, Param))
@@ -7953,7 +7952,7 @@ bool Sema::isValidSveBitcast(QualType srcTy, QualType destTy) {
   assert(srcTy->isVectorType() || destTy->isVectorType());
 
   auto ValidScalableConversion = [](QualType FirstType, QualType SecondType) {
-    if (!FirstType->isSizelessBuiltinType())
+    if (!FirstType->isSVESizelessBuiltinType())
       return false;
 
     const auto *VecTy = SecondType->getAs<VectorType>();
@@ -9887,8 +9886,8 @@ Sema::CheckAssignmentConstraints(QualType LHSType, ExprResult &RHS,
     }
 
     // Allow assignments between fixed-length and sizeless SVE vectors.
-    if ((LHSType->isSizelessBuiltinType() && RHSType->isVectorType()) ||
-        (LHSType->isVectorType() && RHSType->isSizelessBuiltinType()))
+    if ((LHSType->isSVESizelessBuiltinType() && RHSType->isVectorType()) ||
+        (LHSType->isVectorType() && RHSType->isSVESizelessBuiltinType()))
       if (Context.areCompatibleSveTypes(LHSType, RHSType) ||
           Context.areLaxCompatibleSveTypes(LHSType, RHSType)) {
         Kind = CK_BitCast;
@@ -10766,12 +10765,14 @@ QualType Sema::CheckVectorOperands(ExprResult &LHS, ExprResult &RHS,
     return QualType();
   }
 
-  // Expressions containing GNU and SVE (fixed or sizeless) vectors are invalid
-  // since the ambiguity can affect the ABI.
-  auto IsSveGnuConversion = [](QualType FirstType, QualType SecondType) {
+  // Expressions containing GNU and SVE or RVV (fixed or sizeless) vectors are
+  // invalid since the ambiguity can affect the ABI.
+  auto IsSveRVVGnuConversion = [](QualType FirstType, QualType SecondType,
+                                  unsigned &SVEorRVV) {
     const VectorType *FirstVecType = FirstType->getAs<VectorType>();
     const VectorType *SecondVecType = SecondType->getAs<VectorType>();
 
+    SVEorRVV = 0;
     if (FirstVecType && SecondVecType)
       return FirstVecType->getVectorKind() == VectorType::GenericVector &&
              (SecondVecType->getVectorKind() ==
@@ -10779,13 +10780,24 @@ QualType Sema::CheckVectorOperands(ExprResult &LHS, ExprResult &RHS,
               SecondVecType->getVectorKind() ==
                   VectorType::SveFixedLengthPredicateVector);
 
-    return FirstType->isSizelessBuiltinType() && SecondVecType &&
-           SecondVecType->getVectorKind() == VectorType::GenericVector;
+    if (SecondVecType &&
+        SecondVecType->getVectorKind() == VectorType::GenericVector) {
+      if (FirstType->isSVESizelessBuiltinType())
+        return true;
+      if (FirstType->isRVVSizelessBuiltinType()) {
+        SVEorRVV = 1;
+        return true;
+      }
+    }
+
+    return false;
   };
 
-  if (IsSveGnuConversion(LHSType, RHSType) ||
-      IsSveGnuConversion(RHSType, LHSType)) {
-    Diag(Loc, diag::err_typecheck_sve_gnu_ambiguous) << LHSType << RHSType;
+  unsigned SVEorRVV;
+  if (IsSveRVVGnuConversion(LHSType, RHSType, SVEorRVV) ||
+      IsSveRVVGnuConversion(RHSType, LHSType, SVEorRVV)) {
+    Diag(Loc, diag::err_typecheck_sve_rvv_gnu_ambiguous)
+        << SVEorRVV << LHSType << RHSType;
     return QualType();
   }
 
@@ -17985,10 +17997,13 @@ HandleImmediateInvocations(Sema &SemaRef,
     if (!CE.getInt())
       EvaluateAndDiagnoseImmediateInvocation(SemaRef, CE);
   for (auto *DR : Rec.ReferenceToConsteval) {
-    auto *FD = cast<FunctionDecl>(DR->getDecl());
+    NamedDecl *ND = cast<FunctionDecl>(DR->getDecl());
+    if (auto *MD = llvm::dyn_cast<CXXMethodDecl>(ND);
+        MD && (MD->isLambdaStaticInvoker() || isLambdaCallOperator(MD)))
+      ND = MD->getParent();
     SemaRef.Diag(DR->getBeginLoc(), diag::err_invalid_consteval_take_address)
-        << FD;
-    SemaRef.Diag(FD->getLocation(), diag::note_declared_at);
+        << ND << isa<CXXRecordDecl>(ND);
+    SemaRef.Diag(ND->getLocation(), diag::note_declared_at);
   }
 }
 
@@ -19094,11 +19109,6 @@ bool Sema::tryCaptureVariable(
     }
   }
 
-
-  // If the variable is declared in the current context, there is no need to
-  // capture it.
-  if (VarDC == DC) return true;
-
   // Capture global variables if it is required to use private copy of this
   // variable.
   bool IsGlobal = !VD->hasLocalStorage();
@@ -19124,12 +19134,41 @@ bool Sema::tryCaptureVariable(
   bool Explicit = (Kind != TryCapture_Implicit);
   unsigned FunctionScopesIndex = MaxFunctionScopesIndex;
   do {
+
+    LambdaScopeInfo *LSI = nullptr;
+    if (!FunctionScopes.empty())
+      LSI = dyn_cast_or_null<LambdaScopeInfo>(
+          FunctionScopes[FunctionScopesIndex]);
+
+    bool IsInScopeDeclarationContext =
+        !LSI || LSI->AfterParameterList || CurContext == LSI->CallOperator;
+
+    if (LSI && !LSI->AfterParameterList) {
+      // This allows capturing parameters from a default value which does not
+      // seems correct
+      if (isa<ParmVarDecl>(Var) && !Var->getDeclContext()->isFunctionOrMethod())
+        return true;
+    }
+    // If the variable is declared in the current context, there is no need to
+    // capture it.
+    if (IsInScopeDeclarationContext &&
+        FunctionScopesIndex == MaxFunctionScopesIndex && VarDC == DC)
+      return true;
+
+    // When evaluating some attributes (like enable_if) we might refer to a
+    // function parameter appertaining to the same declaration as that
+    // attribute.
+    if (const auto *Parm = dyn_cast<ParmVarDecl>(Var);
+        Parm && Parm->getDeclContext() == DC)
+      return true;
+
     // Only block literals, captured statements, and lambda expressions can
     // capture; other scopes don't work.
-    DeclContext *ParentDC = getParentOfCapturingContextOrNull(DC, Var,
-                                                              ExprLoc,
-                                                              BuildAndDiagnose,
-                                                              *this);
+    DeclContext *ParentDC =
+        !IsInScopeDeclarationContext
+            ? DC->getParent()
+            : getParentOfCapturingContextOrNull(DC, Var, ExprLoc,
+                                                BuildAndDiagnose, *this);
     // We need to check for the parent *first* because, if we *have*
     // private-captured a global variable, we need to recursively capture it in
     // intermediate blocks, lambdas, etc.
@@ -19143,7 +19182,6 @@ bool Sema::tryCaptureVariable(
 
     FunctionScopeInfo  *FSI = FunctionScopes[FunctionScopesIndex];
     CapturingScopeInfo *CSI = cast<CapturingScopeInfo>(FSI);
-
 
     // Check whether we've already captured it.
     if (isVariableAlreadyCapturedInScopeInfo(CSI, Var, Nested, CaptureType,
@@ -19260,10 +19298,10 @@ bool Sema::tryCaptureVariable(
       }
       return true;
     }
-
-    FunctionScopesIndex--;
-    DC = ParentDC;
     Explicit = false;
+    FunctionScopesIndex--;
+    if (IsInScopeDeclarationContext)
+      DC = ParentDC;
   } while (!VarDC->Equals(DC));
 
   // Walk back down the scope stack, (e.g. from outer lambda to inner lambda)
@@ -19865,14 +19903,31 @@ static void DoMarkVarDeclReferenced(
           DRE->setDecl(DRE->getDecl());
         else if (auto *ME = dyn_cast_or_null<MemberExpr>(E))
           ME->setMemberDecl(ME->getMemberDecl());
-      } else if (FirstInstantiation ||
-                 isa<VarTemplateSpecializationDecl>(Var)) {
+      } else if (FirstInstantiation) {
+        SemaRef.PendingInstantiations
+            .push_back(std::make_pair(Var, PointOfInstantiation));
+      } else {
+        bool Inserted = false;
+        for (auto &I : SemaRef.SavedPendingInstantiations) {
+          auto Iter = llvm::find_if(
+              I, [Var](const Sema::PendingImplicitInstantiation &P) {
+                return P.first == Var;
+              });
+          if (Iter != I.end()) {
+            SemaRef.PendingInstantiations.push_back(*Iter);
+            I.erase(Iter);
+            Inserted = true;
+            break;
+          }
+        }
+
         // FIXME: For a specialization of a variable template, we don't
         // distinguish between "declaration and type implicitly instantiated"
         // and "implicit instantiation of definition requested", so we have
         // no direct way to avoid enqueueing the pending instantiation
         // multiple times.
-        SemaRef.PendingInstantiations
+        if (isa<VarTemplateSpecializationDecl>(Var) && !Inserted)
+          SemaRef.PendingInstantiations
             .push_back(std::make_pair(Var, PointOfInstantiation));
       }
     }

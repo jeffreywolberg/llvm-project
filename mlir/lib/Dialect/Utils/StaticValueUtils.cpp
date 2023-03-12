@@ -102,6 +102,16 @@ SmallVector<OpFoldResult> getAsOpFoldResult(ArrayAttr arrayAttr) {
   return res;
 }
 
+OpFoldResult getAsIndexOpFoldResult(MLIRContext *ctx, int64_t val) {
+  return IntegerAttr::get(IndexType::get(ctx), val);
+}
+
+SmallVector<OpFoldResult> getAsIndexOpFoldResult(MLIRContext *ctx,
+                                                 ArrayRef<int64_t> values) {
+  return llvm::to_vector<4>(llvm::map_range(
+      values, [ctx](int64_t v) { return getAsIndexOpFoldResult(ctx, v); }));
+}
+
 /// If ofr is a constant integer or an IntegerAttr, return the integer.
 std::optional<int64_t> getConstantIntValue(OpFoldResult ofr) {
   // Case 1: Check for Constant integer.
@@ -136,16 +146,14 @@ bool isEqualConstantIntOrValue(OpFoldResult ofr1, OpFoldResult ofr2) {
   return v1 && v1 == v2;
 }
 
-/// Helper function to convert a vector of `OpFoldResult`s into a vector of
-/// `Value`s. For each `OpFoldResult` in `valueOrAttrVec` return the fold result
-/// if it casts to  a `Value` or create an index-type constant if it casts to
-/// `IntegerAttr`. No other attribute types are supported.
-SmallVector<Value> getAsValues(OpBuilder &b, Location loc,
-                               ArrayRef<OpFoldResult> valueOrAttrVec) {
-  return llvm::to_vector<4>(
-      llvm::map_range(valueOrAttrVec, [&](OpFoldResult value) -> Value {
-        return getValueOrCreateConstantIndexOp(b, loc, value);
-      }));
+bool isEqualConstantIntOrValueArray(ArrayRef<OpFoldResult> ofrs1,
+                                    ArrayRef<OpFoldResult> ofrs2) {
+  if (ofrs1.size() != ofrs2.size())
+    return false;
+  for (auto [ofr1, ofr2] : llvm::zip_equal(ofrs1, ofrs2))
+    if (!isEqualConstantIntOrValue(ofr1, ofr2))
+      return false;
+  return true;
 }
 
 /// Return a vector of OpFoldResults with the same size a staticValues, but all

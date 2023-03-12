@@ -128,7 +128,9 @@ public:
     SourceMgr = &CI.getSourceManager();
     Includes.collect(CI);
     if (Config::current().Diagnostics.UnusedIncludes ==
-        Config::UnusedIncludesPolicy::Experiment)
+                Config::IncludesPolicy::Strict ||
+            Config::current().Diagnostics.MissingIncludes ==
+            Config::IncludesPolicy::Strict)
       Pragmas.record(CI);
     if (BeforeExecuteCallback)
       BeforeExecuteCallback(CI);
@@ -332,6 +334,8 @@ scanPreamble(llvm::StringRef Contents, const tooling::CompileCommand &Cmd) {
   EmptyFS FS;
   // Build and run Preprocessor over the preamble.
   ParseInputs PI;
+  // Memory buffers below expect null-terminated && non-null strings. So make
+  // sure to always use PI.Contents!
   PI.Contents = Contents.str();
   PI.TFS = &FS;
   PI.CompileCommand = Cmd;
@@ -345,8 +349,8 @@ scanPreamble(llvm::StringRef Contents, const tooling::CompileCommand &Cmd) {
   // twice. However, it's important to precisely follow the preamble bounds used
   // elsewhere.
   auto Bounds = ComputePreambleBounds(*CI->getLangOpts(), *ContentsBuffer, 0);
-  auto PreambleContents =
-      llvm::MemoryBuffer::getMemBufferCopy(Contents.substr(0, Bounds.Size));
+  auto PreambleContents = llvm::MemoryBuffer::getMemBufferCopy(
+      llvm::StringRef(PI.Contents).take_front(Bounds.Size));
   auto Clang = prepareCompilerInstance(
       std::move(CI), nullptr, std::move(PreambleContents),
       // Provide an empty FS to prevent preprocessor from performing IO. This
@@ -639,7 +643,7 @@ buildPreamble(PathRef FileName, CompilerInvocation CI,
   auto BuiltPreamble = PrecompiledPreamble::Build(
       CI, ContentsBuffer.get(), Bounds, *PreambleDiagsEngine,
       Stats ? TimedFS : StatCacheFS, std::make_shared<PCHContainerOperations>(),
-      StoreInMemory, CapturedInfo);
+      StoreInMemory, /*StoragePath=*/StringRef(), CapturedInfo);
   PreambleTimer.stopTimer();
 
   // When building the AST for the main file, we do want the function
@@ -739,9 +743,8 @@ PreamblePatch PreamblePatch::create(llvm::StringRef FileName,
   //   whole preamble, which is terribly slow.
   // - If scanning for Modified fails, cannot figure out newly added ones so
   //   there's nothing to do but generate an empty patch.
-  auto BaselineScan = scanPreamble(
-      // Contents needs to be null-terminated.
-      Baseline.Preamble.getContents(), Modified.CompileCommand);
+  auto BaselineScan =
+      scanPreamble(Baseline.Preamble.getContents(), Modified.CompileCommand);
   if (!BaselineScan) {
     elog("Failed to scan baseline of {0}: {1}", FileName,
          BaselineScan.takeError());

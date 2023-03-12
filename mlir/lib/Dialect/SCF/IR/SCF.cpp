@@ -107,7 +107,7 @@ static void replaceOpWithRegion(PatternRewriter &rewriter, Operation *op,
   Block *block = &region.front();
   Operation *terminator = block->getTerminator();
   ValueRange results = terminator->getOperands();
-  rewriter.mergeBlockBefore(block, op, blockArgs);
+  rewriter.inlineBlockBefore(block, op, blockArgs);
   rewriter.replaceOp(op, results);
   rewriter.eraseOp(terminator);
 }
@@ -297,10 +297,11 @@ void ForOp::build(OpBuilder &builder, OperationState &result, Value lb,
   result.addOperands(iterArgs);
   for (Value v : iterArgs)
     result.addTypes(v.getType());
+  Type t = lb.getType();
   Region *bodyRegion = result.addRegion();
   bodyRegion->push_back(new Block);
   Block &bodyBlock = bodyRegion->front();
-  bodyBlock.addArgument(builder.getIndexType(), result.location);
+  bodyBlock.addArgument(t, result.location);
   for (Value v : iterArgs)
     bodyBlock.addArgument(v.getType(), v.getLoc());
 
@@ -337,11 +338,9 @@ LogicalResult ForOp::verify() {
 LogicalResult ForOp::verifyRegions() {
   // Check that the body defines as single block argument for the induction
   // variable.
-  auto *body = getBody();
-  if (!body->getArgument(0).getType().isIndex())
+  if (getInductionVar().getType() != getLowerBound().getType())
     return emitOpError(
-        "expected body first argument to be an index argument for "
-        "the induction variable");
+        "expected induction variable to be same type as bounds and step");
 
   auto opNumResults = getNumResults();
   if (opNumResults == 0)
@@ -363,7 +362,7 @@ LogicalResult ForOp::verifyRegions() {
       return emitOpError() << "types mismatch between " << i
                            << "th iter region arg and defined value";
 
-    i++;
+    ++i;
   }
   return success();
 }
@@ -413,6 +412,8 @@ void ForOp::print(OpAsmPrinter &p) {
   if (!getIterOperands().empty())
     p << " -> (" << getIterOperands().getTypes() << ')';
   p << ' ';
+  if (Type t = getInductionVar().getType(); !t.isIndex())
+    p << " : " << t << ' ';
   p.printRegion(getRegion(),
                 /*printEntryBlockArgs=*/false,
                 /*printBlockTerminators=*/hasIterOperands());
@@ -421,21 +422,27 @@ void ForOp::print(OpAsmPrinter &p) {
 
 ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
-  Type indexType = builder.getIndexType();
+  Type type;
 
   OpAsmParser::Argument inductionVariable;
-  inductionVariable.type = indexType;
   OpAsmParser::UnresolvedOperand lb, ub, step;
 
   // Parse the induction variable followed by '='.
-  if (parser.parseArgument(inductionVariable) || parser.parseEqual() ||
+  if (parser.parseOperand(inductionVariable.ssaName) || parser.parseEqual() ||
       // Parse loop bounds.
-      parser.parseOperand(lb) ||
-      parser.resolveOperand(lb, indexType, result.operands) ||
-      parser.parseKeyword("to") || parser.parseOperand(ub) ||
-      parser.resolveOperand(ub, indexType, result.operands) ||
-      parser.parseKeyword("step") || parser.parseOperand(step) ||
-      parser.resolveOperand(step, indexType, result.operands))
+      parser.parseOperand(lb) || parser.parseKeyword("to") ||
+      parser.parseOperand(ub) || parser.parseKeyword("step") ||
+      parser.parseOperand(step))
+    return failure();
+  // Parse optional type, else assume Index.
+  if (parser.parseOptionalColon())
+    type = builder.getIndexType();
+  else if (parser.parseType(type))
+    return failure();
+  inductionVariable.type = type;
+  if (parser.resolveOperand(lb, type, result.operands) ||
+      parser.resolveOperand(ub, type, result.operands) ||
+      parser.resolveOperand(step, type, result.operands))
     return failure();
 
   // Parse the optional initial iteration arguments.
@@ -623,7 +630,7 @@ namespace {
 // the ForOp region and can just be forwarded after simplifying the op inits,
 // yields and returns.
 //
-// The implementation uses `mergeBlockBefore` to steal the content of the
+// The implementation uses `inlineBlockBefore` to steal the content of the
 // original ForOp and avoid cloning.
 struct ForOpIterArgsFolder : public OpRewritePattern<scf::ForOp> {
   using OpRewritePattern<scf::ForOp>::OpRewritePattern;
@@ -638,7 +645,7 @@ struct ForOpIterArgsFolder : public OpRewritePattern<scf::ForOp> {
     // arguments `newBlockTransferArgs` keeps the 1-1 mapping of original to
     // transformed block argument mappings. This plays the role of a
     // IRMapping for the particular use case of calling into
-    // `mergeBlockBefore`.
+    // `inlineBlockBefore`.
     SmallVector<bool, 4> keepMask;
     keepMask.reserve(yieldOp.getNumOperands());
     SmallVector<Value, 4> newBlockTransferArgs, newIterArgs, newYieldValues,
@@ -708,7 +715,7 @@ struct ForOpIterArgsFolder : public OpRewritePattern<scf::ForOp> {
     // original terminator that has been merged in.
     if (newIterArgs.empty()) {
       auto newYieldOp = cast<scf::YieldOp>(newBlock.getTerminator());
-      rewriter.mergeBlockBefore(&oldBlock, newYieldOp, newBlockTransferArgs);
+      rewriter.inlineBlockBefore(&oldBlock, newYieldOp, newBlockTransferArgs);
       rewriter.eraseOp(newBlock.getTerminator()->getPrevNode());
       rewriter.replaceOp(forOp, newResultValues);
       return success();
@@ -894,8 +901,7 @@ static ForOp replaceTensorCastForOpIterArg(PatternRewriter &rewriter,
 ///     %2 = call @do(%iter_t0) : (tensor<?x?xf32>) -> tensor<?x?xf32>
 ///     scf.yield %2 : tensor<?x?xf32>
 ///   }
-///   %2 = tensor.cast %1 : tensor<?x?xf32> to tensor<32x1024xf32>
-///   use_of(%2)
+///   use_of(%1)
 /// ```
 ///
 /// folds into:
@@ -908,7 +914,8 @@ static ForOp replaceTensorCastForOpIterArg(PatternRewriter &rewriter,
 ///     %4 = tensor.cast %3 : tensor<?x?xf32> to tensor<32x1024xf32>
 ///     scf.yield %4 : tensor<32x1024xf32>
 ///   }
-///   use_of(%0)
+///   %1 = tensor.cast %0 : tensor<32x1024xf32> to tensor<?x?xf32>
+///   use_of(%1)
 /// ```
 struct ForOpTensorCastFolder : public OpRewritePattern<ForOp> {
   using OpRewritePattern<ForOp>::OpRewritePattern;
@@ -920,16 +927,13 @@ struct ForOpTensorCastFolder : public OpRewritePattern<ForOp> {
       auto incomingCast = iterOpOperand.get().getDefiningOp<tensor::CastOp>();
       if (!incomingCast)
         continue;
+      // If the dest type of the cast does not preserve static information in
+      // the source type.
+      if (!tensor::preservesStaticInformation(
+              incomingCast.getDest().getType(),
+              incomingCast.getSource().getType()))
+        continue;
       if (!std::get<1>(it).hasOneUse())
-        continue;
-      auto outgoingCastOp =
-          dyn_cast<tensor::CastOp>(*std::get<1>(it).user_begin());
-      if (!outgoingCastOp)
-        continue;
-
-      // Must be a tensor.cast op pair with matching types.
-      if (outgoingCastOp.getResult().getType() !=
-          incomingCast.getSource().getType())
         continue;
 
       // Create a new ForOp with that iter operand replaced.
@@ -1445,21 +1449,23 @@ public:
         failed(foldDynamicIndexList(rewriter, mixedStep)))
       return failure();
 
-    SmallVector<Value> dynamicLowerBound, dynamicUpperBound, dynamicStep;
-    SmallVector<int64_t> staticLowerBound, staticUpperBound, staticStep;
-    dispatchIndexOpFoldResults(mixedLowerBound, dynamicLowerBound,
-                               staticLowerBound);
-    op.getDynamicLowerBoundMutable().assign(dynamicLowerBound);
-    op.setStaticLowerBound(staticLowerBound);
+    rewriter.updateRootInPlace(op, [&]() {
+      SmallVector<Value> dynamicLowerBound, dynamicUpperBound, dynamicStep;
+      SmallVector<int64_t> staticLowerBound, staticUpperBound, staticStep;
+      dispatchIndexOpFoldResults(mixedLowerBound, dynamicLowerBound,
+                                 staticLowerBound);
+      op.getDynamicLowerBoundMutable().assign(dynamicLowerBound);
+      op.setStaticLowerBound(staticLowerBound);
 
-    dispatchIndexOpFoldResults(mixedUpperBound, dynamicUpperBound,
-                               staticUpperBound);
-    op.getDynamicUpperBoundMutable().assign(dynamicUpperBound);
-    op.setStaticUpperBound(staticUpperBound);
+      dispatchIndexOpFoldResults(mixedUpperBound, dynamicUpperBound,
+                                 staticUpperBound);
+      op.getDynamicUpperBoundMutable().assign(dynamicUpperBound);
+      op.setStaticUpperBound(staticUpperBound);
 
-    dispatchIndexOpFoldResults(mixedStep, dynamicStep, staticStep);
-    op.getDynamicStepMutable().assign(dynamicStep);
-    op.setStaticStep(staticStep);
+      dispatchIndexOpFoldResults(mixedStep, dynamicStep, staticStep);
+      op.getDynamicStepMutable().assign(dynamicStep);
+      op.setStaticStep(staticStep);
+    });
     return success();
   }
 };
@@ -1595,13 +1601,26 @@ IfOp::inferReturnTypes(MLIRContext *ctx, std::optional<Location> loc,
 
 void IfOp::build(OpBuilder &builder, OperationState &result,
                  TypeRange resultTypes, Value cond) {
+  return build(builder, result, resultTypes, cond, /*addThenBlock=*/false,
+               /*addElseBlock=*/false);
+}
+
+void IfOp::build(OpBuilder &builder, OperationState &result,
+                 TypeRange resultTypes, Value cond, bool addThenBlock,
+                 bool addElseBlock) {
+  assert((!addElseBlock || addThenBlock) &&
+         "must not create else block w/o then block");
   result.addTypes(resultTypes);
   result.addOperands(cond);
 
-  // Build regions.
+  // Add regions and blocks.
   OpBuilder::InsertionGuard guard(builder);
-  result.addRegion();
-  result.addRegion();
+  Region *thenRegion = result.addRegion();
+  if (addThenBlock)
+    builder.createBlock(thenRegion);
+  Region *elseRegion = result.addRegion();
+  if (addElseBlock)
+    builder.createBlock(elseRegion);
 }
 
 void IfOp::build(OpBuilder &builder, OperationState &result, Value cond,
@@ -3077,7 +3096,8 @@ struct WhileConditionTruth : public OpRewritePattern<WhileOp> {
                 op.getLoc(), term.getCondition().getType(),
                 rewriter.getBoolAttr(true));
 
-          std::get<1>(yieldedAndBlockArgs).replaceAllUsesWith(constantTrue);
+          rewriter.replaceAllUsesWith(std::get<1>(yieldedAndBlockArgs),
+                                      constantTrue);
           replaced = true;
         }
       }

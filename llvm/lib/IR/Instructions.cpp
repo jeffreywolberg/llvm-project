@@ -325,6 +325,22 @@ Intrinsic::ID CallBase::getIntrinsicID() const {
   return Intrinsic::not_intrinsic;
 }
 
+FPClassTest CallBase::getRetNoFPClass() const {
+  FPClassTest Mask = Attrs.getRetNoFPClass();
+
+  if (const Function *F = getCalledFunction())
+    Mask |= F->getAttributes().getRetNoFPClass();
+  return Mask;
+}
+
+FPClassTest CallBase::getParamNoFPClass(unsigned i) const {
+  FPClassTest Mask = Attrs.getParamNoFPClass(i);
+
+  if (const Function *F = getCalledFunction())
+    Mask |= F->getAttributes().getParamNoFPClass(i);
+  return Mask;
+}
+
 bool CallBase::isReturnNonNull() const {
   if (hasRetAttr(Attribute::NonNull))
     return true;
@@ -4136,6 +4152,11 @@ StringRef CmpInst::getPredicateName(Predicate Pred) {
   case ICmpInst::ICMP_ULT:   return "ult";
   case ICmpInst::ICMP_ULE:   return "ule";
   }
+}
+
+raw_ostream &llvm::operator<<(raw_ostream &OS, CmpInst::Predicate Pred) {
+  OS << CmpInst::getPredicateName(Pred);
+  return OS;
 }
 
 ICmpInst::Predicate ICmpInst::getSignedPredicate(Predicate pred) {

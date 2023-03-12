@@ -284,10 +284,11 @@ public:
 
   /// Enum of different potentially desirable ways to fold (and/or (setcc ...),
   /// (setcc ...)).
-  enum class AndOrSETCCFoldKind {
-    None,
-    AddAnd,
-    ABS,
+  enum AndOrSETCCFoldKind : uint8_t {
+    None = 0,   // No fold is preferable.
+    AddAnd = 1, // Fold with `Add` op and `And` op is preferable.
+    NotAnd = 2, // Fold with `Not` op and `And` op is preferable.
+    ABS = 4,    // Fold with `llvm.abs` op is preferable.
   };
 
   class ArgListEntry {
@@ -1650,6 +1651,10 @@ public:
 
     return true;
   }
+
+  /// Return true (the default) if it is profitable to remove a sext_inreg(x)
+  /// where the sext is redundant, and use x directly.
+  virtual bool shouldRemoveRedundantExtend(SDValue Op) const { return true; }
 
   /// When splitting a value of the specified type into parts, does the Lo
   /// or Hi part come first?  This usually follows the endianness, except
@@ -3050,10 +3055,10 @@ public:
     return false;
   }
 
-  /// Return true if it's profitable to narrow operations of type VT1 to
-  /// VT2. e.g. on x86, it's profitable to narrow from i32 to i8 but not from
+  /// Return true if it's profitable to narrow operations of type SrcVT to
+  /// DestVT. e.g. on x86, it's profitable to narrow from i32 to i8 but not from
   /// i32 to i16.
-  virtual bool isNarrowingProfitable(EVT /*VT1*/, EVT /*VT2*/) const {
+  virtual bool isNarrowingProfitable(EVT SrcVT, EVT DestVT) const {
     return false;
   }
 
@@ -4962,7 +4967,7 @@ public:
   /// \param Test The test to perform.
   /// \param Flags The optimization flags.
   /// \returns The expansion result or SDValue() if it fails.
-  SDValue expandIS_FPCLASS(EVT ResultVT, SDValue Op, unsigned Test,
+  SDValue expandIS_FPCLASS(EVT ResultVT, SDValue Op, FPClassTest Test,
                            SDNodeFlags Flags, const SDLoc &DL,
                            SelectionDAG &DAG) const;
 

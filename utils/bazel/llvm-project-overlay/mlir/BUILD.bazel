@@ -2223,6 +2223,7 @@ cc_library(
     deps = [
         ":AffineDialect",
         ":ArithDialect",
+        ":ArithUtils",
         ":BufferizationDialect",
         ":BufferizationTransforms",
         ":ComplexDialect",
@@ -3387,6 +3388,7 @@ cc_library(
         ":ArithDialect",
         ":ArithUtils",
         ":ControlFlowInterfaces",
+        ":DataLayoutInterfaces",
         ":DestinationStyleOpInterface",
         ":DialectUtils",
         ":IR",
@@ -3556,6 +3558,21 @@ cc_library(
 )
 
 cc_library(
+    name = "Debug",
+    srcs = glob([
+        "lib/Debug/*.cpp",
+        "lib/Debug/*.h",
+    ]),
+    hdrs = glob(["include/mlir/Debug/*.h"]),
+    includes = ["include"],
+    deps = [
+        ":Support",
+        ":IR",
+        "//llvm:Support",
+    ],
+)
+
+cc_library(
     name = "MlirLspServerSupportLib",
     srcs = glob(
         [
@@ -3712,11 +3729,11 @@ gentbl_cc_library(
     tbl_outs = [
         (
             ["-gen-op-interface-decls"],
-            "include/mlir/Dialect/LLVMIR/LLVMOpsInterfaces.h.inc",
+            "include/mlir/Dialect/LLVMIR/LLVMInterfaces.h.inc",
         ),
         (
             ["-gen-op-interface-defs"],
-            "include/mlir/Dialect/LLVMIR/LLVMOpsInterfaces.cpp.inc",
+            "include/mlir/Dialect/LLVMIR/LLVMInterfaces.cpp.inc",
         ),
         (
             ["-gen-type-interface-decls"],
@@ -3728,7 +3745,7 @@ gentbl_cc_library(
         ),
     ],
     tblgen = ":mlir-tblgen",
-    td_file = "include/mlir/Dialect/LLVMIR/LLVMOpsInterfaces.td",
+    td_file = "include/mlir/Dialect/LLVMIR/LLVMInterfaces.td",
     deps = [":LLVMOpsTdFiles"],
 )
 
@@ -4102,7 +4119,7 @@ td_library(
         "include/mlir/Dialect/LLVMIR/LLVMIntrinsicOps.td",
         "include/mlir/Dialect/LLVMIR/LLVMOpBase.td",
         "include/mlir/Dialect/LLVMIR/LLVMOps.td",
-        "include/mlir/Dialect/LLVMIR/LLVMOpsInterfaces.td",
+        "include/mlir/Dialect/LLVMIR/LLVMInterfaces.td",
         "include/mlir/Dialect/LLVMIR/LLVMTypes.td",
     ],
     includes = ["include"],
@@ -4247,9 +4264,11 @@ cc_library(
     ]),
     includes = ["include"],
     deps = [
+        ":ArithDialect",
         ":ConversionPassIncGen",
         ":IR",
         ":Pass",
+        ":Support",
         ":SPIRVConversion",
         ":SPIRVDialect",
         ":Transforms",
@@ -5453,6 +5472,7 @@ cc_library(
     includes = ["include"],
     deps = [
         ":AffineDialect",
+        ":ArithUtils",
         ":DialectUtils",
         ":IR",
         ":InferTypeOpInterface",
@@ -5490,6 +5510,7 @@ cc_library(
     deps = [
         ":AffineDialect",
         ":ArithDialect",
+        ":DialectUtils",
         ":TensorDialect",
         "//llvm:Support",
     ],
@@ -6833,6 +6854,7 @@ cc_library(
     deps = [
         ":BytecodeReader",
         ":BytecodeWriter",
+        ":Debug",
         ":IR",
         ":Parser",
         ":Pass",
@@ -7058,6 +7080,7 @@ cc_binary(
         "//mlir/test:TestTransforms",
         "//mlir/test:TestTypeDialect",
         "//mlir/test:TestVector",
+        "//mlir/test:TestVectorToSPIRV",
     ],
 )
 
@@ -8460,11 +8483,13 @@ cc_library(
         ":DialectUtils",
         ":FuncDialect",
         ":FuncTransforms",
+        ":GPUDialect",
         ":IR",
         ":LinalgDialect",
         ":LinalgPassIncGen",
         ":LinalgStructuredOpsIncGen",
         ":LinalgUtils",
+        ":LoopLikeInterface",
         ":MaskableOpInterface",
         ":MathDialect",
         ":MemRefDialect",
@@ -8759,6 +8784,7 @@ cc_library(
         ":Support",
         ":Transforms",
         ":VectorDialect",
+        ":VectorTransforms",
         ":VectorUtils",
         "//llvm:Core",
         "//llvm:Support",

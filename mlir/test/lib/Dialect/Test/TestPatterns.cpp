@@ -93,8 +93,7 @@ public:
     // (unchanged) operation result.
     OperationFolder folder(op->getContext());
     Value result = folder.create<TestOpInPlaceFold>(
-        rewriter, op->getLoc(), rewriter.getIntegerType(32), op->getOperand(0),
-        rewriter.getI32IntegerAttr(0));
+        rewriter, op->getLoc(), rewriter.getIntegerType(32), op->getOperand(0));
     assert(result);
     rewriter.replaceOp(op, result);
     return success();
@@ -1593,7 +1592,7 @@ struct TestMergeSingleBlockOps
     Block &innerBlock = op.getRegion().front();
     TerminatorOp innerTerminator =
         cast<TerminatorOp>(innerBlock.getTerminator());
-    rewriter.mergeBlockBefore(&innerBlock, op);
+    rewriter.inlineBlockBefore(&innerBlock, op);
     rewriter.eraseOp(innerTerminator);
     rewriter.eraseOp(op);
     rewriter.updateRootInPlace(op, [] {});

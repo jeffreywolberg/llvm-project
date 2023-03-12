@@ -1396,6 +1396,79 @@ Currently, only the following parameter attributes are defined:
     undefined. Note that this does not refer to padding introduced by the
     type's storage representation.
 
+.. _nofpclass:
+
+``nofpclass(<test mask>)``
+    This attribute applies to parameters and return values with
+    floating-point and vector of floating-point types, as well as
+    arrays of such types. The test mask has the same format as the
+    second argument to the :ref:`llvm.is.fpclass <llvm.is.fpclass>`,
+    and indicates which classes of floating-point values are not
+    permitted for the value. For example a bitmask of 3 indicates
+    the parameter may not be a NaN.
+
+    If the value is a floating-point class indicated by the
+    ``nofpclass`` test mask, a :ref:`poison value <poisonvalues>` is
+    passed or returned instead.
+
+.. code-block:: text
+  :caption: The following invariants hold
+
+       @llvm.is.fpclass(nofpclass(test_mask) %x, test_mask) => false
+       @llvm.is.fpclass(nofpclass(test_mask) %x, ~test_mask) => true
+       nofpclass(all) => poison
+..
+
+   In textual IR, various string names are supported for readability
+   and can be combined. For example ``nofpclass(nan pinf nzero)``
+   evaluates to a mask of 547.
+
+   This does not depend on the floating-point environment. For
+   example, a function parameter marked ``nofpclass(zero)`` indicates
+   no zero inputs. If this is applied to an argument in a function
+   marked with :ref:`\"denormal-fp-math\" <denormal_fp_math>`
+   indicating zero treatment of input denormals, it does not imply the
+   value cannot be a denormal value which would compare equal to 0.
+
+.. table:: Recognized test mask names
+
+    +-------+----------------------+---------------+
+    | Name  | floating-point class | Bitmask value |
+    +=======+======================+===============+
+    |  nan  | Any NaN              |       3       |
+    +-------+----------------------+---------------+
+    |  inf  | +/- infinity         |      516      |
+    +-------+----------------------+---------------+
+    |  norm | +/- normal           |       26      |
+    +-------+----------------------+---------------+
+    |  sub  | +/- subnormal        |      144      |
+    +-------+----------------------+---------------+
+    |  zero | +/- 0                |       96      |
+    +-------+----------------------+---------------+
+    |  all  | All values           |     1023      |
+    +-------+----------------------+---------------+
+    | snan  | Signaling NaN        |       1       |
+    +-------+----------------------+---------------+
+    | qnan  | Quiet NaN            |       2       |
+    +-------+----------------------+---------------+
+    | ninf  | Negative infinity    |       4       |
+    +-------+----------------------+---------------+
+    | nnorm | Negative normal      |       8       |
+    +-------+----------------------+---------------+
+    | nsub  | Negative subnormal   |       16      |
+    +-------+----------------------+---------------+
+    | nzero | Negative zero        |       32      |
+    +-------+----------------------+---------------+
+    | pzero | Positive zero        |       64      |
+    +-------+----------------------+---------------+
+    | psub  | Positive subnormal   |       128     |
+    +-------+----------------------+---------------+
+    | pnorm | Positive normal      |       256     |
+    +-------+----------------------+---------------+
+    | pinf  | Positive infinity    |       512     |
+    +-------+----------------------+---------------+
+
+
 ``alignstack(<n>)``
     This indicates the alignment that should be considered by the backend when
     assigning this parameter to a stack slot during calling convention
@@ -2147,6 +2220,8 @@ example:
     might otherwise be set or cleared by calling this function. LLVM will
     not introduce any new floating-point instructions that may trap.
 
+.. _denormal_fp_math:
+
 ``"denormal-fp-math"``
     This indicates the denormal (subnormal) handling that may be
     assumed for the default floating-point environment. This is a
@@ -2399,8 +2474,8 @@ operand bundle to not miscompile programs containing it.
 - The bundle operands for an unknown operand bundle escape in unknown
   ways before control is transferred to the callee or invokee.
 - Calls and invokes with operand bundles have unknown read / write
-  effect on the heap on entry and exit (even if the call target is
-  ``readnone`` or ``readonly``), unless they're overridden with
+  effect on the heap on entry and exit (even if the call target specifies
+  a ``memory`` attribute), unless they're overridden with
   callsite specific attributes.
 - An operand bundle at a call site cannot change the implementation
   of the called function.  Inter-procedural optimizations work as
@@ -2770,23 +2845,23 @@ as follows:
     specified, the default index size is equal to the pointer size. All sizes
     are in bits. The address space, ``n``, is optional, and if not specified,
     denotes the default address space 0. The value of ``n`` must be
-    in the range [1,2^23).
+    in the range [1,2^24).
 ``i<size>:<abi>[:<pref>]``
     This specifies the alignment for an integer type of a given bit
-    ``<size>``. The value of ``<size>`` must be in the range [1,2^23).
+    ``<size>``. The value of ``<size>`` must be in the range [1,2^24).
     ``<pref>`` is optional and defaults to ``<abi>``.
     For ``i8``, the ``<abi>`` value must equal 8,
     that is, ``i8`` must be naturally aligned.
 ``v<size>:<abi>[:<pref>]``
     This specifies the alignment for a vector type of a given bit
-    ``<size>``. The value of ``<size>`` must be in the range [1,2^23).
+    ``<size>``. The value of ``<size>`` must be in the range [1,2^24).
     ``<pref>`` is optional and defaults to ``<abi>``.
 ``f<size>:<abi>[:<pref>]``
     This specifies the alignment for a floating-point type of a given bit
     ``<size>``. Only values of ``<size>`` that are supported by the target
     will work. 32 (float) and 64 (double) are supported on all targets; 80
     or 128 (different flavors of long double) are also supported on some
-    targets. The value of ``<size>`` must be in the range [1,2^23).
+    targets. The value of ``<size>`` must be in the range [1,2^24).
     ``<pref>`` is optional and defaults to ``<abi>``.
 ``a:<abi>[:<pref>]``
     This specifies the alignment for an object of aggregate type.
@@ -5979,10 +6054,10 @@ sense that a debugger might modify its value), whereas *implicit locations*
 describe merely the actual *value* of a source variable which might not exist
 in registers or in memory (see ``DW_OP_stack_value``).
 
-A ``llvm.dbg.addr`` or ``llvm.dbg.declare`` intrinsic describes an indirect
-value (the address) of a source variable. The first operand of the intrinsic
-must be an address of some kind. A DIExpression attached to the intrinsic
-refines this address to produce a concrete location for the source variable.
+A ``llvm.dbg.declare`` intrinsic describes an indirect value (the address) of a
+source variable. The first operand of the intrinsic must be an address of some
+kind. A DIExpression attached to the intrinsic refines this address to produce a
+concrete location for the source variable.
 
 A ``llvm.dbg.value`` intrinsic describes the direct value of a source variable.
 The first operand of the intrinsic may be a direct or indirect value. A
@@ -10683,14 +10758,14 @@ to LLVM:
       return &s[1].Z.B[5][13];
     }
 
-The LLVM code generated by Clang is:
+The LLVM code generated by Clang is approximately:
 
 .. code-block:: llvm
 
     %struct.RT = type { i8, [10 x [20 x i32]], i8 }
     %struct.ST = type { i32, double, %struct.RT }
 
-    define ptr @foo(ptr %s) nounwind uwtable readnone optsize ssp {
+    define ptr @foo(ptr %s) {
     entry:
       %arrayidx = getelementptr inbounds %struct.ST, ptr %s, i64 1, i32 2, i32 1, i64 5, i64 13
       ret ptr %arrayidx
@@ -12810,7 +12885,7 @@ Syntax:
       declare <pointer type>
         @llvm.experimental.gc.get.pointer.base(
           <pointer type> readnone nocapture %derived_ptr)
-          nounwind readnone willreturn
+          nounwind willreturn memory(none)
 
 Overview:
 """""""""
@@ -12848,7 +12923,7 @@ Syntax:
       declare i64
         @llvm.experimental.gc.get.pointer.offset(
           <pointer type> readnone nocapture %derived_ptr)
-          nounwind readnone willreturn
+          nounwind willreturn memory(none)
 
 Overview:
 """""""""
@@ -24984,6 +25059,8 @@ Floating-Point Test Intrinsics
 These functions get properties of floating-point values.
 
 
+.. _llvm.is.fpclass:
+
 '``llvm.is.fpclass``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -25515,7 +25592,7 @@ Syntax:
 
 ::
 
-      declare type @llvm.ssa.copy(type %operand) returned(1) readnone
+      declare type @llvm.ssa.copy(type returned %operand) memory(none)
 
 Arguments:
 """"""""""
@@ -25542,7 +25619,7 @@ Syntax:
 
 ::
 
-      declare i1 @llvm.type.test(ptr %ptr, metadata %type) nounwind readnone
+      declare i1 @llvm.type.test(ptr %ptr, metadata %type) nounwind memory(none)
 
 
 Arguments:
@@ -25567,7 +25644,7 @@ Syntax:
 
 ::
 
-      declare {ptr, i1} @llvm.type.checked.load(ptr %ptr, i32 %offset, metadata %type) argmemonly nounwind readonly
+      declare {ptr, i1} @llvm.type.checked.load(ptr %ptr, i32 %offset, metadata %type) nounwind memory(argmem: read)
 
 
 Arguments:
@@ -25657,7 +25734,7 @@ Syntax:
 
 ::
 
-      declare void @llvm.donothing() nounwind readnone
+      declare void @llvm.donothing() nounwind memory(none)
 
 Overview:
 """""""""
@@ -25953,7 +26030,7 @@ Syntax:
 
 ::
 
-      declare ptr @llvm.load.relative.iN(ptr %ptr, iN %offset) argmemonly nounwind readonly
+      declare ptr @llvm.load.relative.iN(ptr %ptr, iN %offset) nounwind memory(argmem: read)
 
 Overview:
 """""""""
@@ -26012,9 +26089,9 @@ This is an overloaded intrinsic. You can use llvm.is.constant with any argument 
 
 ::
 
-      declare i1 @llvm.is.constant.i32(i32 %operand) nounwind readnone
-      declare i1 @llvm.is.constant.f32(float %operand) nounwind readnone
-      declare i1 @llvm.is.constant.TYPENAME(TYPE %operand) nounwind readnone
+      declare i1 @llvm.is.constant.i32(i32 %operand) nounwind memory(none)
+      declare i1 @llvm.is.constant.f32(float %operand) nounwind memory(none)
+      declare i1 @llvm.is.constant.TYPENAME(TYPE %operand) nounwind memory(none)
 
 Overview:
 """""""""
@@ -26057,7 +26134,7 @@ Syntax:
 
 ::
 
-      declare ptrty llvm.ptrmask(ptrty %ptr, intty %mask) readnone speculatable
+      declare ptrty llvm.ptrmask(ptrty %ptr, intty %mask) speculatable memory(none)
 
 Arguments:
 """"""""""
@@ -26093,7 +26170,7 @@ Syntax:
 
 ::
 
-      declare ptr @llvm.threadlocal.address(ptr) nounwind readnone willreturn
+      declare ptr @llvm.threadlocal.address(ptr) nounwind willreturn memory(none)
 
 Arguments:
 """"""""""

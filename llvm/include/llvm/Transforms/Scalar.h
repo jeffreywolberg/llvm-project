@@ -33,12 +33,6 @@ FunctionPass *createAlignmentFromAssumptionsPass();
 
 //===----------------------------------------------------------------------===//
 //
-// SCCP - Sparse conditional constant propagation.
-//
-FunctionPass *createSCCPPass();
-
-//===----------------------------------------------------------------------===//
-//
 // RedundantDbgInstElimination - This pass removes redundant dbg intrinsics
 // without modifying the CFG of the function.  It is a FunctionPass.
 //
@@ -53,27 +47,12 @@ Pass *createRedundantDbgInstEliminationPass();
 //
 FunctionPass *createDeadCodeEliminationPass();
 
-//===----------------------------------------------------------------------===//
-//
-// DeadStoreElimination - This pass deletes stores that are post-dominated by
-// must-aliased stores and are not loaded used between the stores.
-//
-FunctionPass *createDeadStoreEliminationPass();
-
 
 //===----------------------------------------------------------------------===//
 //
 // CallSiteSplitting - This pass split call-site based on its known argument
 // values.
 FunctionPass *createCallSiteSplittingPass();
-
-//===----------------------------------------------------------------------===//
-//
-// AggressiveDCE - This pass uses the SSA based Aggressive DCE algorithm.  This
-// algorithm assumes instructions are dead until proven otherwise, which makes
-// it more successful are removing non-obviously dead instructions.
-//
-FunctionPass *createAggressiveDCEPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -113,13 +92,6 @@ FunctionPass *createSROAPass(bool PreserveCFG = true);
 // linear functions of the induction variable.
 //
 Pass *createInductiveRangeCheckEliminationPass();
-
-//===----------------------------------------------------------------------===//
-//
-// InductionVariableSimplify - Transform induction variables in a program to all
-// use a single canonical induction variable per loop.
-//
-Pass *createIndVarSimplifyPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -196,22 +168,6 @@ FunctionPass *createReassociatePass();
 
 //===----------------------------------------------------------------------===//
 //
-// JumpThreading - Thread control through mult-pred/multi-succ blocks where some
-// preds always go to some succ. Thresholds other than minus one
-// override the internal BB duplication default threshold.
-//
-FunctionPass *createJumpThreadingPass(int Threshold = -1);
-
-//===----------------------------------------------------------------------===//
-//
-// DFAJumpThreading - When a switch statement inside a loop is used to
-// implement a deterministic finite automata we can jump thread the switch
-// statement reducing number of conditional jumps.
-//
-FunctionPass *createDFAJumpThreadingPass();
-
-//===----------------------------------------------------------------------===//
-//
 // CFGSimplification - Merge basic blocks, eliminate unreachable blocks,
 // simplify terminator instructions, convert switches to lookup tables, etc.
 //
@@ -279,12 +235,6 @@ FunctionPass *createNewGVNPass();
 
 //===----------------------------------------------------------------------===//
 //
-// DivRemPairs - Hoist/decompose integer division and remainder instructions.
-//
-FunctionPass *createDivRemPairsPass();
-
-//===----------------------------------------------------------------------===//
-//
 // MemCpyOpt - This pass performs optimizations related to eliminating memcpy
 // calls and/or combining multiple stores into memset's.
 //
@@ -338,12 +288,6 @@ Pass *createLowerWidenableConditionPass();
 // MergeICmps - Merge integer comparison chains into a memcmp
 //
 Pass *createMergeICmpsLegacyPass();
-
-//===----------------------------------------------------------------------===//
-//
-// ValuePropagation - Propagate CFG-derived value information
-//
-Pass *createCorrelatedValuePropagationPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -439,13 +383,6 @@ FunctionPass *createNaryReassociatePass();
 // LoopDataPrefetch - Perform data prefetching in loops.
 //
 FunctionPass *createLoopDataPrefetchPass();
-
-//===----------------------------------------------------------------------===//
-//
-// LibCallsShrinkWrap - Shrink-wraps a call to function if the result is not
-// used.
-//
-FunctionPass *createLibCallsShrinkWrapPass();
 
 //===----------------------------------------------------------------------===//
 //

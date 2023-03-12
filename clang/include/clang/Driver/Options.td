@@ -1215,7 +1215,7 @@ defm xl_pragma_pack : BoolFOption<"xl-pragma-pack",
 def shared_libsan : Flag<["-"], "shared-libsan">,
   HelpText<"Dynamically link the sanitizer runtime">;
 def static_libsan : Flag<["-"], "static-libsan">,
-  HelpText<"Statically link the sanitizer runtime">;
+  HelpText<"Statically link the sanitizer runtime (Not supported for ASan, TSan or UBSan on darwin)">;
 def : Flag<["-"], "shared-libasan">, Alias<shared_libsan>;
 def fasm : Flag<["-"], "fasm">, Group<f_Group>;
 
@@ -1241,10 +1241,10 @@ defm autolink : BoolFOption<"autolink",
 def offload_EQ : CommaJoined<["--"], "offload=">, Flags<[NoXarchOption]>,
   HelpText<"Specify comma-separated list of offloading target triples (CUDA and HIP only)">;
 
-// C++ Coroutines TS
-defm coroutines_ts : BoolFOption<"coroutines-ts",
+// C++ Coroutines
+defm coroutines : BoolFOption<"coroutines",
   LangOpts<"Coroutines">, Default<cpp20.KeyPath>,
-  PosFlag<SetTrue, [CC1Option], "Enable support for the C++ Coroutines TS">,
+  PosFlag<SetTrue, [CC1Option], "Enable support for the C++ Coroutines">,
   NegFlag<SetFalse>>;
 
 defm coro_aligned_allocation : BoolFOption<"coro-aligned-allocation",
@@ -2237,13 +2237,13 @@ def flax_vector_conversions : Flag<["-"], "flax-vector-conversions">, Group<f_Gr
 def flimited_precision_EQ : Joined<["-"], "flimited-precision=">, Group<f_Group>;
 def fapple_link_rtlib : Flag<["-"], "fapple-link-rtlib">, Group<f_Group>,
   HelpText<"Force linking the clang builtins runtime library">;
-def flto_EQ : Joined<["-"], "flto=">, Flags<[CoreOption, CC1Option]>, Group<f_Group>,
+def flto_EQ : Joined<["-"], "flto=">, Flags<[CoreOption, CC1Option, FC1Option, FlangOption]>, Group<f_Group>,
   HelpText<"Set LTO mode">, Values<"thin,full">;
 def flto_EQ_jobserver : Flag<["-"], "flto=jobserver">, Group<f_Group>,
   Alias<flto_EQ>, AliasArgs<["full"]>, HelpText<"Enable LTO in 'full' mode">;
 def flto_EQ_auto : Flag<["-"], "flto=auto">, Group<f_Group>,
   Alias<flto_EQ>, AliasArgs<["full"]>, HelpText<"Enable LTO in 'full' mode">;
-def flto : Flag<["-"], "flto">, Flags<[CoreOption, CC1Option]>, Group<f_Group>,
+def flto : Flag<["-"], "flto">, Flags<[CoreOption, CC1Option, FC1Option, FlangOption]>, Group<f_Group>,
   Alias<flto_EQ>, AliasArgs<["full"]>, HelpText<"Enable LTO in 'full' mode">;
 def fno_lto : Flag<["-"], "fno-lto">, Flags<[CoreOption, CC1Option]>, Group<f_Group>,
   HelpText<"Disable LTO mode (default)">;
@@ -4253,19 +4253,15 @@ def rpath : Separate<["-"], "rpath">, Flags<[LinkerInput]>, Group<Link_Group>;
 def rtlib_EQ : Joined<["-", "--"], "rtlib=">,
   HelpText<"Compiler runtime library to use">;
 def frtlib_add_rpath: Flag<["-"], "frtlib-add-rpath">, Flags<[NoArgumentUnused]>,
-  HelpText<"Add -rpath with architecture-specific resource directory to the linker flags">;
+  HelpText<"Add -rpath with architecture-specific resource directory to the linker flags. "
+  "When --hip-link is specified, also add -rpath with HIP runtime library directory to the linker flags">;
 def fno_rtlib_add_rpath: Flag<["-"], "fno-rtlib-add-rpath">, Flags<[NoArgumentUnused]>,
-  HelpText<"Do not add -rpath with architecture-specific resource directory to the linker flags">;
+  HelpText<"Do not add -rpath with architecture-specific resource directory to the linker flags. "
+  "When --hip-link is specified, do not add -rpath with HIP runtime library directory to the linker flags">;
 def offload_add_rpath: Flag<["--"], "offload-add-rpath">, Flags<[NoArgumentUnused]>,
-  HelpText<"Add -rpath with HIP runtime library directory to the linker flags">;
+  Alias<frtlib_add_rpath>;
 def no_offload_add_rpath: Flag<["--"], "no-offload-add-rpath">, Flags<[NoArgumentUnused]>,
-  HelpText<"Do not add -rpath with HIP runtime library directory to the linker flags">;
-defm openmp_implicit_rpath: BoolFOption<"openmp-implicit-rpath",
-  LangOpts<"OpenMP">,
-  DefaultTrue,
-  PosFlag<SetTrue, [], "Set rpath on OpenMP executables">,
-  NegFlag<SetFalse>,
-  BothFlags<[NoArgumentUnused]>>;
+  Alias<frtlib_add_rpath>;
 def r : Flag<["-"], "r">, Flags<[LinkerInput,NoArgumentUnused]>,
         Group<Link_Group>;
 def save_temps_EQ : Joined<["-", "--"], "save-temps=">, Flags<[CC1Option, FlangOption, NoXarchOption]>,
@@ -4345,8 +4341,8 @@ def print_supported_cpus : Flag<["-", "--"], "print-supported-cpus">,
   HelpText<"Print supported cpu models for the given target (if target is not specified,"
            " it will print the supported cpus for the default target)">,
   MarshallingInfoFlag<FrontendOpts<"PrintSupportedCPUs">>;
-def mcpu_EQ_QUESTION : Flag<["-"], "mcpu=?">, Alias<print_supported_cpus>;
-def mtune_EQ_QUESTION : Flag<["-"], "mtune=?">, Alias<print_supported_cpus>;
+def : Flag<["-"], "mcpu=help">, Alias<print_supported_cpus>;
+def : Flag<["-"], "mtune=help">, Alias<print_supported_cpus>;
 def time : Flag<["-"], "time">,
   HelpText<"Time individual commands">;
 def traditional_cpp : Flag<["-", "--"], "traditional-cpp">, Flags<[CC1Option]>,
@@ -6530,7 +6526,7 @@ def fno_cuda_host_device_constexpr : Flag<["-"], "fno-cuda-host-device-constexpr
 
 def fopenmp_is_device : Flag<["-"], "fopenmp-is-device">,
   HelpText<"Generate code only for an OpenMP target device.">,
-  Flags<[CC1Option, NoDriverOption]>;
+  Flags<[CC1Option, FC1Option, NoDriverOption]>;
 def fopenmp_host_ir_file_path : Separate<["-"], "fopenmp-host-ir-file-path">,
   HelpText<"Path to the IR file produced by the frontend for the host.">,
   Flags<[CC1Option, NoDriverOption]>;
@@ -7043,6 +7039,16 @@ def _SLASH_Gv : CLFlag<"Gv">,
   HelpText<"Set __vectorcall as a default calling convention">;
 def _SLASH_Gregcall : CLFlag<"Gregcall">,
   HelpText<"Set __regcall as a default calling convention">;
+
+// GNU Driver aliases
+
+def : Separate<["-"], "Xmicrosoft-visualc-tools-root">, Alias<_SLASH_vctoolsdir>;
+def : Separate<["-"], "Xmicrosoft-visualc-tools-version">,
+    Alias<_SLASH_vctoolsversion>;
+def : Separate<["-"], "Xmicrosoft-windows-sdk-root">,
+    Alias<_SLASH_winsdkdir>;
+def : Separate<["-"], "Xmicrosoft-windows-sdk-version">,
+    Alias<_SLASH_winsdkversion>;
 
 // Ignored:
 
