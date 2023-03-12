@@ -1,19 +1,18 @@
-# How to Get Started with the Forked Repo (Edited 03/12/2023)
+## How to Get Started with the Forked Repo (Edited 03/12/2023)
 The best instructions are [here](https://llvm.org/docs/CMake.html) and [here](https://llvm.org/docs/GettingStarted.html). I will summarize the steps to build LLVM below:
 
 At the root directory, 
-```mkdir build && cd build```
-```cmake ../```
-The next step should take a while:
-```sudo make -j$(NPROC)```
-```cmake --build . --target install```
+1. ```mkdir build && cd build```
+2. ```cmake ../```
+3. ```sudo make -j$(NPROC)```. This should take a decent amount of time (~20-40 min).
+4. ```cmake --build . --target install```
 As a test, ensure that `build/bin/opt` has been created.
 
-# How to Run A Function Pass (Edited 03/12/2023)
+## How to Run An LLVM IR Function Pass (Edited 03/12/2023)
 Navigate to `llvm/lib/Transforms/FuncArgParser`, which is the folder where our [LLVM IR Pass](https://llvm.org/docs/WritingAnLLVMPass.html) is written.
 
 `FuncArgParser.cpp` is the .cpp file which implements our FuncArgParser LLVM IR pass.
-Running `make pass` will compile `example/hello.c` into a `.bc` file and run a command that passes it through the FuncArgParser LLVM IR pass. It should output in stdout the functions' arg types in a canonical form. See the Makefile for the actual commands being run.
+Running `make pass` will compile `example/hello.c` into a `.bc` file and run a command that passes it through the FuncArgParser LLVM IR pass. It should output in stdout the functions' arg types in the canonical form `funcName$argNo:arg_LLVM_IR_Type`. See the Makefile for the actual commands being run.
 
 To recompile the pass, run ```make LLVMFuncArgParser.so```
 To generate a `.bc` file from a `.c` file, run ```make $(TARGET).bc```, though make sure to edit the `TARGET_DIR` and `TARGET_FILE` variables in the Makefile.
