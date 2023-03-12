@@ -23,31 +23,15 @@ CXXFLAGS += -Wall -D_GLIBCXX_USE_CXX11_ABI=${FORCE_USE_ABI}
 
 LDFLAGS = -g -shared -Wl,-undefined,dynamic_lookup
 
-.PHONY: default
-default: hello
-
 $(PLUGIN): $(PLUGIN).o
 	$(CXX) $(LDFLAGS) $^ -o $@
 
 $(PLUGIN).o: $(PLUGIN).cpp
 	$(CXX) -c $(CXXFLAGS) $^ -o $@
 
-hello: hello.o hello.ll hello.bc
-	$(CC) $< -o $@
-hello.o: hello.c hello.h
-	$(CC) -c $< -o $@
-
-.PHONY: hello.ll
-hello.ll: hello.c
-	clang -O3 -emit-llvm $^ -S -o hello.ll
-
-.PHONY: hello.bc
-hello.bc: hello.c
-	clang -O3 -emit-llvm $^ -c -o hello.bc
-
 .PHONY: LLVM$(PLUGIN).so
 LLVM$(PLUGIN).so:
-	cd ../../../../build && gmake
+	cd $(LLVM_DIR)/build && gmake
 
 .PHONY: clean
 clean:
@@ -55,13 +39,3 @@ clean:
 
 .PHONY: all 
 all: clean $(PLUGIN)
-
-.PHONY: run_pass
-run_pass:
-	opt -enable-new-pm=0 --debug-pass=Structure -load ../../../../build/lib/LLVM$(PLUGIN).so -hello2 < hello.bc > /dev/null
-
-.PHONY: pass_c
-pass_c: hello LLVM$(PLUGIN).so run_pass
-
-.PHONY: pass
-pass: hello run_pass
