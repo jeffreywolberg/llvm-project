@@ -1,7 +1,15 @@
-PLUGIN = FuncArgParser
-LLVM_IR_PASS_NAME = funcArgParser
+## Run the LLVM pass named $(LLVM_IR_PASS_NAME) on the bytecode file of $(TARGET_DIR)/$(TARGET_FILE).c
 
+#####################  EDIT THESE ################################
+MODULE_NAME = FuncArgParser
+LLVM_IR_PASS_NAME = funcArgParser
 LLVM_DIR = /home/jeffrey/Research/llvm-project
+TARGET_DIR = example
+TARGET_FILE = hello
+#####################  EDIT THESE (END) ################################
+
+TARGET = $(TARGET_DIR)/$(TARGET_FILE)
+
 LLVM_BUILD_DIR = $(LLVM_DIR)/build
 CLANG_DIR = $(LLVM_DIR)/clang
 CLANG = $(LLVM_BUILD_DIR)/bin/clang
@@ -24,9 +32,6 @@ CXXFLAGS += -Wall -D_GLIBCXX_USE_CXX11_ABI=${FORCE_USE_ABI}
 
 LDFLAGS = -g -shared -Wl,-undefined,dynamic_lookup
 
-TARGET_DIR = example
-TARGET=$(TARGET_DIR)/hello
-
 .PHONY: default
 default: $(TARGET)
 
@@ -43,20 +48,20 @@ $(TARGET).ll: $(TARGET).c
 $(TARGET).bc: $(TARGET).c
 	clang -O3 -emit-llvm $^ -c -o $(TARGET).bc
 
-.PHONY: LLVM$(PLUGIN).so
-LLVM$(PLUGIN).so:
+.PHONY: LLVM$(MODULE_NAME).so
+LLVM$(MODULE_NAME).so:
 	cd $(LLVM_DIR)/build && gmake
 
 .PHONY: clean
 clean:
-	rm -rf $(PLUGIN) $(TARGET) $(TARGET_DIR)/*.ll $(TARGET_DIR)/*.bc $(TARGET_DIR)/*.o a.out core
+	rm -rf $(MODULE_NAME) $(TARGET) $(TARGET_DIR)/*.ll $(TARGET_DIR)/*.bc $(TARGET_DIR)/*.o a.out core
 
 .PHONY: run_pass
 run_pass:
-	opt -enable-new-pm=0 -opaque-pointers=0 -load $(LLVM_DIR)/build/lib/LLVM$(PLUGIN).so -$(LLVM_IR_PASS_NAME) < $(TARGET).bc
+	opt -enable-new-pm=0 -opaque-pointers=0 -load $(LLVM_DIR)/build/lib/LLVM$(MODULE_NAME).so -$(LLVM_IR_PASS_NAME) < $(TARGET).bc
 
 .PHONY: pass_c # compile the llvm IR pass and run it with the $(TARGET) file
-pass_c: $(TARGET) LLVM$(PLUGIN).so run_pass
+pass_c: $(TARGET) LLVM$(MODULE_NAME).so run_pass
 
 .PHONY: pass # run the llvm IR pass with the $(TARGET) file
 pass: $(TARGET) run_pass
